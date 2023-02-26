@@ -5,3 +5,4 @@ Paxos
 3. Key/Value
 4. Node statistics -> state logs
 5. Leader with higher requests, threshold -> leader_priority
+6. Testing cases -> https://doc.rust-lang.org/book/ch11-01-writing-tests.html
