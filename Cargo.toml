@@ -7,5 +7,8 @@ edition = "2021"
 
 [dependencies]
 actix-web = "4.0.0"
+commitlog = "0.2.0"
+sled = "0.34.7"
 omnipaxos_core = { git = "https://github.com/haraldng/omnipaxos" }
 omnipaxos_storage = { git = "https://github.com/haraldng/omnipaxos", default-features = true }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
