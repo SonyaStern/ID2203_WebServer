@@ -1,7 +1,22 @@
-use crate::kv::{KeyValue};
+use crate::kv::{KeyValue, KVSnapshot};
 use omnipaxos_core::{messages::Message, util::NodeId};
 
-impl Server {
+use crate::{OmniPaxosKV, util::{ELECTION_TIMEOUT, OUTGOING_MESSAGE_PERIOD}};
+
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
+use tokio::{sync::mpsc, time};
+
+
+pub struct OmniPaxosServer {
+    pub omni_paxos: Arc<Mutex<OmniPaxosKV>>,
+    pub incoming: mpsc::Receiver<Message<KeyValue, KVSnapshot>>,
+    pub outgoing: HashMap<NodeId, mpsc::Sender<Message<KeyValue, KVSnapshot>>>,
+}
+
+impl OmniPaxosServer {
 
     async fn send_outgoing_msgs(&mut self) {
         let messages = self.omni_paxos.lock().unwrap().outgoing_messages();
