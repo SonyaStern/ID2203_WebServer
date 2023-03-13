@@ -1,7 +1,9 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+// #[macro_use]
+// extern crate lazy_static;
+
+
+use std::{collections::HashMap, fs, sync::{Arc, Mutex}};
+use lazy_static::lazy_static;
 
 use commitlog::LogOptions;
 use omnipaxos_core::{
@@ -12,6 +14,7 @@ use omnipaxos_core::{
 use omnipaxos_storage::persistent_storage::{PersistentStorage, PersistentStorageConfig};
 use sled::Config;
 use tokio::{runtime::Builder, sync::mpsc};
+use tokio::task::JoinHandle;
 
 use crate::{
     kv::{KeyValue, KVSnapshot},
@@ -27,6 +30,19 @@ mod util;
 type OmniPaxosKV = OmniPaxos<KeyValue, KVSnapshot, PersistentStorage<KeyValue, KVSnapshot>>;
 
 const SERVERS: [u64; 3] = [1, 2, 3];
+const PERSIST_PATH: &str  =  "storage";
+// const op_server_handles: HashMap<u64, (Arc<Mutex<OmniPaxosKV>>, JoinHandle<()>)> = HashMap::new();
+
+lazy_static! {
+    static ref OP_SERVER_HANDLES: Mutex<HashMap<u64, (Arc<Mutex<OmniPaxosKV>>, JoinHandle<()>, OmniPaxosConfig)>> = {
+        let map = HashMap::new();
+        Mutex::new(map)
+    };
+    static ref TO_RECOVER: Mutex<Vec<NodeId>> = {
+        let list = Vec::new();
+        Mutex::new(list)
+    };
+}
 
 fn initialise_channels() -> (
     // TODO: Should replace with tokio-rpc?
@@ -45,6 +61,14 @@ fn initialise_channels() -> (
 }
 
 fn main() {
+
+    // Clean-up
+    fs::remove_dir_all("storage1");
+    fs::remove_dir_all("storage2");
+    fs::remove_dir_all("storage3");
+
+
+    // Initialization
     let runtime = Builder::new_multi_thread()
         .worker_threads(4)
         .enable_all()
@@ -53,7 +77,7 @@ fn main() {
 
     // configuration with id 1 and the following cluster
     let configuration_id = 1;
-    let mut op_server_handles = HashMap::new();
+
     let (sender_channels, mut receiver_channels) = initialise_channels();
 
     // create the replicas in this cluster
@@ -66,19 +90,13 @@ fn main() {
             ..Default::default()
         };
 
-        // user-defined configuration for the persistent storage for each node
-        let persist_path = "storage";
-        let log_opts = LogOptions::new(persist_path);
-        let mut sled_opts = Config::new();
-        sled_opts = Config::path(sled_opts, persist_path);
 
-        // generate default configuration and set user-defined options
-        let persist_config = PersistentStorageConfig::with(
-            String::from(persist_path) + &*pid.to_string(), log_opts, sled_opts);
+        // user-defined configuration for the persistent storage for each node
+
+        let persist_config = OmniPaxosServer::configure_persistent_storage(String::from(PERSIST_PATH) + &*pid.to_string());
 
         let omni_paxos: Arc<Mutex<OmniPaxosKV>> =
-            Arc::new(Mutex::new(op_config.build(PersistentStorage::new(persist_config))));
-
+            Arc::new(Mutex::new(op_config.clone().build(PersistentStorage::new(persist_config))));
 
 
         let mut op_server = OmniPaxosServer {
@@ -91,16 +109,18 @@ fn main() {
                 op_server.run().await;
             }
         });
-        op_server_handles.insert(pid, (omni_paxos, join_handle));
-
-
+        OP_SERVER_HANDLES.lock().unwrap().insert(pid, (omni_paxos, join_handle, op_config.clone()));
     }
 
 
+    /*
+    Demo
+    */
 
+    let handlers = OP_SERVER_HANDLES.lock().unwrap();
     // wait for leader to be elected...
     std::thread::sleep(WAIT_LEADER_TIMEOUT);
-    let (first_server, _) = op_server_handles.get(&1).unwrap();
+    let (first_server, _, _) = handlers.get(&1).unwrap();
     // check which server is the current leader
     let leader = first_server
         .lock()
@@ -110,7 +130,7 @@ fn main() {
     println!("Elected leader: {}", leader);
 
     let follower = SERVERS.iter().find(|&&p| p != leader).unwrap();
-    let (follower_server, _) = op_server_handles.get(follower).unwrap();
+    let (follower_server, _, _) = handlers.get(follower).unwrap();
     // append kv1 to the replicated log via follower
     let kv1 = KeyValue {
         key: "a".to_string(),
@@ -122,13 +142,14 @@ fn main() {
         .unwrap()
         .append(kv1)
         .expect("append failed");
+
     // append kv2 to the replicated log via the leader
     let kv2 = KeyValue {
         key: "b".to_string(),
         value: 2,
     };
     println!("Adding value: {:?} via server {}", kv2, leader);
-    let (leader_server, leader_join_handle) = op_server_handles.get(&leader).unwrap();
+    let (leader_server, leader_join_handle, _) = handlers.get(&leader).unwrap();
     leader_server
         .lock()
         .unwrap()
@@ -154,6 +175,7 @@ fn main() {
     println!("KV store: {:?}", simple_kv_store);
     println!("Killing leader: {}...", leader);
     leader_join_handle.abort();
+
     // wait for new leader to be elected...
     std::thread::sleep(WAIT_LEADER_TIMEOUT);
     let leader = follower_server
@@ -167,7 +189,7 @@ fn main() {
         value: 3,
     };
     println!("Adding value: {:?} via server {}", kv3, leader);
-    let (leader_server, _) = op_server_handles.get(&leader).unwrap();
+    let (leader_server, _, _) = handlers.get(&leader).unwrap();
     leader_server
         .lock()
         .unwrap()
@@ -189,4 +211,46 @@ fn main() {
         }
     }
     println!("KV store: {:?}", simple_kv_store);
+
+    std::mem::drop(leader_join_handle);
+    recovery();
+}
+
+
+fn recovery() {
+    // Configuration from previous storage
+    // let log_opts = LogOptions::new(path);
+    let pids = TO_RECOVER.lock().unwrap();
+    let runtime = Builder::new_multi_thread()
+        .worker_threads(4)
+        .enable_all()
+        .build()
+        .unwrap();
+
+    for pid in pids.iter() {
+        println!("Recovering pid {:?}", pid);
+
+        // Re-create storage with previous state, then create `OmniPaxos`
+        let persist_conf = OmniPaxosServer::configure_persistent_storage(String::from(PERSIST_PATH) + &*pid.to_string());
+        let recovered_storage: PersistentStorage<KeyValue, KVSnapshot> = PersistentStorage::open(persist_conf);
+        let handlers = OP_SERVER_HANDLES.lock().unwrap();
+        let (_, old_join, config) = handlers.get(pid).unwrap();
+        let recovered_paxos = Arc::new(Mutex::new(config.clone().build(recovered_storage)));
+
+        let (sender_channels, mut receiver_channels) = initialise_channels();
+
+        let mut op_server = OmniPaxosServer {
+            omni_paxos: Arc::clone(&recovered_paxos),
+            incoming: receiver_channels.remove(&pid).unwrap(),
+            outgoing: sender_channels.clone(),
+        };
+        let join_handle = runtime.spawn({
+            async move {
+                op_server.run().await;
+            }
+        });
+        recovered_paxos.lock().unwrap().fail_recovery();
+        OP_SERVER_HANDLES.lock().unwrap().insert(*pid, (recovered_paxos, join_handle, config.clone()));
+
+    }
 }
