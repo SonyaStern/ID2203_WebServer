@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use actix_web::HttpResponse;
 use actix_web::web::Json;
 use actix_web::post;
+use http::StatusCode;
 use omnipaxos_core::util::LogEntry;
 
 use crate::{KeyValue, WAIT_DECIDED_TIMEOUT};
@@ -33,7 +34,7 @@ pub async fn create(kv_req: Json<KeyValue>) -> HttpResponse {
 
     let (leader, _, _) = handler.get(&leader_pid).unwrap();
 
-    std::thread::sleep(WAIT_DECIDED_TIMEOUT);
+    std::thread::sleep(WAIT_DECIDED_TIMEOUT * 5);
 
     let committed_ents = leader
         .lock()
@@ -52,8 +53,8 @@ pub async fn create(kv_req: Json<KeyValue>) -> HttpResponse {
     }
     println!("KV store: {:?}", simple_kv_store);
 
-    let response = serde_json::to_string(&kv).unwrap();
     HttpResponse::Created()
         .content_type("application/json")
-        .json(response)
+        .status(StatusCode::CREATED)
+        .json(&kv)
 }
