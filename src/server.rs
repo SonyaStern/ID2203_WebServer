@@ -22,7 +22,7 @@ impl OmniPaxosServer {
     async fn send_outgoing_msgs(&mut self) {
         let messages = self.omni_paxos.lock().unwrap().outgoing_messages();
         for msg in messages {
-            println!("Outgoing message: {:?}", msg);
+            // println!("Outgoing message: {:?}", msg);
             let receiver = msg.get_receiver();
             // send out_msg to receiver on network layer
             let channel = self
@@ -30,11 +30,11 @@ impl OmniPaxosServer {
                 .get_mut(&receiver)
                 .expect("No channel for receiver");
             let response = channel.send(msg).await;
-            println!("Response message: {:?}", response);
+            // println!("Response message: {:?}", response);
             if response.is_err() {
                 println!("Here is error: {:?}", response);
                 let mut list = TO_RECOVER.lock().unwrap();
-                list.insert(0, receiver);
+                list.insert(receiver);
             }
         }
     }
