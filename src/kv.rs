@@ -8,8 +8,7 @@ pub struct KeyValue {
     pub value: u64,
 }
 
-#[derive(Clone, Debug)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct KVSnapshot {
     snapshotted: HashMap<String, u64>,
 }

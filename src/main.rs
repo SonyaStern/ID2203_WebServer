@@ -1,8 +1,13 @@
-// #[macro_use]
-// extern crate lazy_static;
-
-
 use std::{collections::HashMap, collections::HashSet, fs, sync::{Arc, Mutex}};
+
+use actix_web::{get, post, put, delete, web, App, HttpRequest, HttpResponse, HttpServer, Responder, ResponseError};
+use actix_web::http::header::ContentType;
+use actix_web::http::StatusCode;
+use actix_web::body::BoxBody;
+
+use serde::{Serialize, Deserialize};
+
+use std::fmt::Display;
 
 use lazy_static::lazy_static;
 use omnipaxos_core::{
@@ -19,11 +24,13 @@ use crate::{
     server::OmniPaxosServer,
     util::*,
 };
+use crate::kv_controller::create;
 
 mod nodes;
 mod kv;
 mod server;
 mod util;
+mod kv_controller;
 
 type OmniPaxosKV = OmniPaxos<KeyValue, KVSnapshot, PersistentStorage<KeyValue, KVSnapshot>>;
 
@@ -31,10 +38,10 @@ const SERVERS: [u64; 3] = [1, 2, 3];
 const PERSIST_PATH: &str = "storage";
 
 lazy_static! {
-    // static ref OP_SERVER_HANDLES: Mutex<HashMap<u64, (Arc<Mutex<OmniPaxosKV>>, JoinHandle<()>, OmniPaxosConfig)>> = {
-    //     let map = HashMap::new();
-    //     Mutex::new(map)
-    // };
+    static ref OP_SERVER_HANDLERS: Mutex<HashMap<u64, (Arc<Mutex<OmniPaxosKV>>, JoinHandle<()>, OmniPaxosConfig)>> = {
+        let map = HashMap::new();
+        Mutex::new(map)
+    };
     static ref TO_RECOVER: Mutex<HashSet<NodeId>> = {
         let list = HashSet::new();
         Mutex::new(list)
@@ -50,7 +57,6 @@ lazy_static! {
 }
 
 fn initialise_channels() -> (
-    // TODO: Should replace with tokio-rpc?
     HashMap<NodeId, mpsc::Sender<Message<KeyValue, KVSnapshot>>>,
     HashMap<NodeId, mpsc::Receiver<Message<KeyValue, KVSnapshot>>>,
 ) {
@@ -65,7 +71,9 @@ fn initialise_channels() -> (
     (sender_channels, receiver_channels)
 }
 
-fn main() {
+
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
 
     // Clean-up
     fs::remove_dir_all("storage1");
@@ -108,107 +116,117 @@ fn main() {
         handlers.insert(pid, (omni_paxos, join_handle, op_config.clone()));
     }
 
+    OP_SERVER_HANDLERS.lock().unwrap().extend(handlers);
+
+    HttpServer::new(move || {
+        App::new()
+            .service(create)
+    })
+        .bind(("127.0.0.1", 8000))?
+        .run()
+        .await
+
     /*
     Demo
     */
 
     // wait for leader to be elected...
-    std::thread::sleep(WAIT_LEADER_TIMEOUT);
-    let (first_server, _, _) = handlers.get(&1).unwrap();
-    // check which server is the current leader
-    let leader = first_server
-        .lock()
-        .unwrap()
-        .get_current_leader()
-        .expect("Failed to get leader");
-    println!("Elected leader: {}", leader);
-
-    let follower = SERVERS.iter().find(|&&p| p != leader).unwrap();
-    let (follower_server, _, _) = handlers.get(follower).unwrap();
-    // append kv1 to the replicated log via follower
-    let kv1 = KeyValue {
-        key: "a".to_string(),
-        value: 1,
-    };
-    println!("Adding value: {:?} via server {}", kv1, follower);
-    follower_server
-        .lock()
-        .unwrap()
-        .append(kv1)
-        .expect("append failed");
-
-    // append kv2 to the replicated log via the leader
-    let kv2 = KeyValue {
-        key: "b".to_string(),
-        value: 2,
-    };
-    println!("Adding value: {:?} via server {}", kv2, leader);
-    let (leader_server, leader_join_handle, _) = handlers.get(&leader).unwrap();
-    leader_server
-        .lock()
-        .unwrap()
-        .append(kv2)
-        .expect("append failed");
-    // wait for the entries to be decided...
-    std::thread::sleep(WAIT_DECIDED_TIMEOUT);
-    let committed_ents = leader_server
-        .lock()
-        .unwrap()
-        .read_decided_suffix(0)
-        .expect("Failed to read expected entries");
-
-    let mut simple_kv_store = HashMap::new();
-    for ent in committed_ents {
-        match ent {
-            LogEntry::Decided(kv) => {
-                simple_kv_store.insert(kv.key, kv.value);
-            }
-            _ => {} // ignore not committed entries
-        }
-    }
-    println!("KV store: {:?}", simple_kv_store);
-    println!("Killing leader: {}...", leader);
-    leader_join_handle.abort();
-
-    // wait for new leader to be elected...
-    std::thread::sleep(WAIT_LEADER_TIMEOUT);
-    let leader = follower_server
-        .lock()
-        .unwrap()
-        .get_current_leader()
-        .expect("Failed to get leader");
-    println!("Elected new leader: {}", leader);
-    let kv3 = KeyValue {
-        key: "b".to_string(),
-        value: 3,
-    };
-    println!("Adding value: {:?} via server {}", kv3, leader);
-    let (leader_server, _, _) = handlers.get(&leader).unwrap();
-    leader_server
-        .lock()
-        .unwrap()
-        .append(kv3)
-        .expect("append failed");
-    // wait for the entries to be decided...
-    std::thread::sleep(WAIT_DECIDED_TIMEOUT);
-    let committed_ents = follower_server
-        .lock()
-        .unwrap()
-        .read_decided_suffix(2)
-        .expect("Failed to read expected entries");
-    for ent in committed_ents {
-        match ent {
-            LogEntry::Decided(kv) => {
-                simple_kv_store.insert(kv.key, kv.value);
-            }
-            _ => {} // ignore not committed entries
-        }
-    }
-    println!("KV store: {:?}", simple_kv_store);
-
-    recovery(handlers, sender_storage);
-    std::thread::sleep(WAIT_LEADER_TIMEOUT);
-    std::thread::sleep(WAIT_LEADER_TIMEOUT * 10);
+    // std::thread::sleep(WAIT_LEADER_TIMEOUT);
+    // let (first_server, _, _) = handlers.get(&1).unwrap();
+    // // check which server is the current leader
+    // let leader = first_server
+    //     .lock()
+    //     .unwrap()
+    //     .get_current_leader()
+    //     .expect("Failed to get leader");
+    // println!("Elected leader: {}", leader);
+    //
+    // let follower = SERVERS.iter().find(|&&p| p != leader).unwrap();
+    // let (follower_server, _, _) = handlers.get(follower).unwrap();
+    // // append kv1 to the replicated log via follower
+    // let kv1 = KeyValue {
+    //     key: "a".to_string(),
+    //     value: 1,
+    // };
+    // println!("Adding value: {:?} via server {}", kv1, follower);
+    // follower_server
+    //     .lock()
+    //     .unwrap()
+    //     .append(kv1)
+    //     .expect("append failed");
+    //
+    // // append kv2 to the replicated log via the leader
+    // let kv2 = KeyValue {
+    //     key: "b".to_string(),
+    //     value: 2,
+    // };
+    // println!("Adding value: {:?} via server {}", kv2, leader);
+    // let (leader_server, leader_join_handle, _) = handlers.get(&leader).unwrap();
+    // leader_server
+    //     .lock()
+    //     .unwrap()
+    //     .append(kv2)
+    //     .expect("append failed");
+    // // wait for the entries to be decided...
+    // std::thread::sleep(WAIT_DECIDED_TIMEOUT);
+    // let committed_ents = leader_server
+    //     .lock()
+    //     .unwrap()
+    //     .read_decided_suffix(0)
+    //     .expect("Failed to read expected entries");
+    //
+    // let mut simple_kv_store = HashMap::new();
+    // for ent in committed_ents {
+    //     match ent {
+    //         LogEntry::Decided(kv) => {
+    //             simple_kv_store.insert(kv.key, kv.value);
+    //         }
+    //         _ => {} // ignore not committed entries
+    //     }
+    // }
+    // println!("KV store: {:?}", simple_kv_store);
+    // println!("Killing leader: {}...", leader);
+    // leader_join_handle.abort();
+    //
+    // // wait for new leader to be elected...
+    // std::thread::sleep(WAIT_LEADER_TIMEOUT);
+    // let leader = follower_server
+    //     .lock()
+    //     .unwrap()
+    //     .get_current_leader()
+    //     .expect("Failed to get leader");
+    // println!("Elected new leader: {}", leader);
+    // let kv3 = KeyValue {
+    //     key: "b".to_string(),
+    //     value: 3,
+    // };
+    // println!("Adding value: {:?} via server {}", kv3, leader);
+    // let (leader_server, _, _) = handlers.get(&leader).unwrap();
+    // leader_server
+    //     .lock()
+    //     .unwrap()
+    //     .append(kv3)
+    //     .expect("append failed");
+    // // wait for the entries to be decided...
+    // std::thread::sleep(WAIT_DECIDED_TIMEOUT);
+    // let committed_ents = follower_server
+    //     .lock()
+    //     .unwrap()
+    //     .read_decided_suffix(2)
+    //     .expect("Failed to read expected entries");
+    // for ent in committed_ents {
+    //     match ent {
+    //         LogEntry::Decided(kv) => {
+    //             simple_kv_store.insert(kv.key, kv.value);
+    //         }
+    //         _ => {} // ignore not committed entries
+    //     }
+    // }
+    // println!("KV store: {:?}", simple_kv_store);
+    //
+    // recovery(handlers, sender_storage);
+    // std::thread::sleep(WAIT_LEADER_TIMEOUT);
+    // std::thread::sleep(WAIT_LEADER_TIMEOUT * 10);
 }
 
 
