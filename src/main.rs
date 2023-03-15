@@ -16,13 +16,14 @@ use crate::{
     server::OmniPaxosServer,
     util::*,
 };
-use crate::kv_controller::create;
+use crate::kv_controller::{create, get};
 
 mod nodes;
 mod kv;
 mod server;
 mod util;
 mod kv_controller;
+mod storage;
 
 type OmniPaxosKV = OmniPaxos<KeyValue, KVSnapshot, PersistentStorage<KeyValue, KVSnapshot>>;
 
@@ -59,6 +60,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .service(create)
+            .service(get)
     })
         .bind(("127.0.0.1", 8000))?
         .run()

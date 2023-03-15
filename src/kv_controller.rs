@@ -1,12 +1,14 @@
-use std::collections::HashMap;
+use actix_web::get;
 use actix_web::HttpResponse;
-use actix_web::web::Json;
 use actix_web::post;
+use actix_web::web::{Json, Path};
 use http::StatusCode;
-use omnipaxos_core::util::LogEntry;
+use serde::Deserialize;
 
-use crate::{KeyValue, WAIT_DECIDED_TIMEOUT};
-use crate::OP_SERVER_HANDLERS;
+use storage::create_kv;
+
+use crate::{KeyValue, storage};
+use crate::storage::get_kv;
 
 #[post("/key-value")]
 pub async fn create(kv_req: Json<KeyValue>) -> HttpResponse {
@@ -15,46 +17,41 @@ pub async fn create(kv_req: Json<KeyValue>) -> HttpResponse {
         value: kv_req.value,
     };
 
-    let handler = OP_SERVER_HANDLERS.lock().unwrap();
-    let (server, _, _) = handler.get(&1).unwrap();
+    let decided_idx = create_kv(kv.clone()).await;
+    println!("decided_idx: {}", decided_idx);
 
-    server
-        .lock()
-        .unwrap()
-        .append(kv.clone())
-        .expect("append failed");
-
-    let leader_pid = server
-        .lock()
-        .unwrap()
-        .get_current_leader()
-        .expect("Leader not found");
-
-    println!("Adding value: {:?} via server {}, leader {}", kv, 1, leader_pid);
-
-    let (leader, _, _) = handler.get(&leader_pid).unwrap();
-
-    std::thread::sleep(WAIT_DECIDED_TIMEOUT * 5);
-
-    let committed_ents = leader
-        .lock()
-        .unwrap()
-        .read_decided_suffix(0)
-        .expect("Failed to read expected entries");
-
-    let mut simple_kv_store = HashMap::new();
-    for ent in committed_ents {
-        match ent {
-            LogEntry::Decided(kv) => {
-                simple_kv_store.insert(kv.key, kv.value);
-            }
-            _ => {} // ignore not committed entries
-        }
-    }
-    println!("KV store: {:?}", simple_kv_store);
+    let response = KeyValueResponse {
+        key: kv.key,
+        value: kv.value,
+        decided_idx,
+    };
 
     HttpResponse::Created()
         .content_type("application/json")
         .status(StatusCode::CREATED)
-        .json(&kv)
+        .json(response)
+}
+
+#[get("/key-value/{key}")]
+pub async fn get(key: Path<String>) -> HttpResponse {
+    let response = get_kv(key.into_inner()).await;
+
+    return if response.key.is_empty() {
+        HttpResponse::NotFound()
+            .content_type("application/json")
+            .status(StatusCode::NOT_FOUND)
+            .finish()
+    } else {
+        HttpResponse::Ok()
+            .content_type("application/json")
+            .status(StatusCode::OK)
+            .json(response)
+    };
+}
+
+#[derive(Clone, Debug, serde::Serialize, Deserialize)]
+pub struct KeyValueResponse {
+    pub key: String,
+    pub value: u64,
+    pub decided_idx: u64,
 }

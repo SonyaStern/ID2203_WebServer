@@ -9,9 +9,9 @@ async fn test_first_route() {
     let request = Request::post(path!["key-value"])
         .with_header("ContentType", "application/json")
         .with_body(KeyValue {
-        key: String::from("a"),
-        value: 2,
-    });
+            key: String::from("a"),
+            value: 2,
+        });
 
     let body = CONTEXT
         .run(request)
@@ -20,13 +20,19 @@ async fn test_first_route() {
         .await;
 
     assert_body_matches! {
-    body,
-    KeyValue { key: "a", value: 2}
+        body,
+        KeyValueResponse { key: "a", value: 2,..}
+    }
 }
-}
-
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct KeyValue {
     pub key: String,
+    pub value: u64
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct KeyValueResponse {
+    pub key: String,
     pub value: u64,
+    pub decided_idx: u64,
 }
