@@ -23,7 +23,7 @@ async fn test_create() {
 
     assert_body_matches! {
         body,
-        KeyValueResponse { key: "a", value: 2,..}
+        KeyValueResponse { key: "a", value: 2, decided_idx: 0}
     }
 }
 
@@ -54,10 +54,11 @@ async fn test_multiple_create() {
     reqs.insert(0, request2);
     reqs.insert(0, request3);
 
-
+    let mut i = -1;
     let bodies = stream::iter(reqs)
         .map(|req| {
             let context = &CONTEXT;
+            i += 1;
             tokio::spawn(async move {
                 let body = CONTEXT
                     .run(req)
@@ -67,7 +68,7 @@ async fn test_multiple_create() {
 
                 assert_body_matches! {
         body,
-        KeyValueResponse { key: "a", ..}
+        KeyValueResponse { key: "a", decided_idx: i, ..}
     }
             })
         })
