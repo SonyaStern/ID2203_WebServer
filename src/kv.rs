@@ -38,7 +38,7 @@ impl KVStore {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct KVSnapshot {
-    snapshotted: HashMap<String, u64>,
+    pub snapshotted: HashMap<String, u64>,
 }
 
 impl Snapshot<KeyValue> for KVSnapshot {
