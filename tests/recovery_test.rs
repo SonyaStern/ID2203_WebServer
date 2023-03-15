@@ -1,7 +1,4 @@
-use actix_web::error::ParseError::Header;
-use actix_web::http::header::{ContentType, HeaderMap};
 use actix_web::http::StatusCode;
-use http::HeaderName;
 use restest::{assert_body_matches, Context, path, Request};
 use serde::{Deserialize, Serialize};
 
