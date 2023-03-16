@@ -63,7 +63,7 @@ pub async fn create_kv(kv: KeyValue) -> u64 {
         let committed_ents = server
             .lock()
             .unwrap()
-            .read_decided_suffix(0)
+            .read_decided_suffix(before_idx)
             .expect("Failed to read expected entries");
         for (i, ent) in committed_ents.iter().enumerate() {
             match ent {
@@ -124,11 +124,6 @@ async fn sync_decided_kv() {
                 }
                 _ => {} // ignore not committed entries
             }
-        }
-        // Overcome 0 index overlap
-        if overlap {
-            storage.decided_idx -= 1;
-            overlap = false;
         }
     }
 }

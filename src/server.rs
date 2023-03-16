@@ -32,9 +32,8 @@ impl OmniPaxosServer {
             let response = channel.send(msg).await;
             // println!("Response message: {:?}", response);
             if response.is_err() {
-                println!("Here is error: {:?}", response);
-                let mut list = TO_RECOVER.lock().unwrap();
-                list.insert(receiver);
+                println!("Here is error: {:?}, pid {}", response, receiver);
+                recovery(receiver);
             }
         }
     }
@@ -68,6 +67,4 @@ impl OmniPaxosServer {
 
         persist_config
     }
-
-
 }

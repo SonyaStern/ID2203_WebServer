@@ -128,20 +128,25 @@ fn initialise_handlers() -> HashMap<u64, (Arc<Mutex<OmniPaxosKV>>, JoinHandle<()
 }
 
 
-fn recovery(mut handlers: HashMap<u64, (Arc<Mutex<OmniPaxosKV>>, JoinHandle<()>, OmniPaxosConfig)>,
-            sender: HashMap<NodeId, mpsc::Sender<Message<KeyValue, KVSnapshot>>>) {
+fn recovery(pid: u64) {
     // Configuration from previous storage
-    let pids = TO_RECOVER.lock().unwrap();
+    // let pids = TO_RECOVER.lock().unwrap();
 
-    for pid in pids.iter() {
+    let mut handlers = OP_SERVER_HANDLERS.lock().unwrap();
+
+    // for pid in pids.iter() {
         println!("---------------- Recovering pid {:?}", pid);
 
         // Re-create storage with previous state, then create `OmniPaxos`
         let (recovered_paxos, old_join, config)
-            = handlers.get(pid).unwrap();
+            = handlers.get(&pid).unwrap();
 
         let (sender_channels, mut receiver_channels) = initialise_channels();
         recovered_paxos.lock().unwrap().fail_recovery();
+        let peers: Vec<u64> = SERVERS.iter().filter(|&&p| p != pid).copied().collect();
+        for peer in peers {
+            recovered_paxos.lock().unwrap().reconnected(peer);
+        }
         let mut op_server = OmniPaxosServer {
             omni_paxos: Arc::clone(&recovered_paxos),
             incoming: receiver_channels.remove(&pid).unwrap(),
@@ -153,11 +158,11 @@ fn recovery(mut handlers: HashMap<u64, (Arc<Mutex<OmniPaxosKV>>, JoinHandle<()>,
             }
         });
         std::thread::sleep(WAIT_LEADER_TIMEOUT);
-        handlers.insert(*pid, (recovered_paxos.clone(), join_handle, config.clone()));
+        // handlers.insert(pid, (recovered_paxos.clone(), join_handle, config.clone()));
         println!("---------------- Recovered pid {:?}", pid);
 
         // Check leaders
-        let follower = SERVERS.iter().find(|&&p| p == *pid).unwrap();
+        let follower = SERVERS.iter().find(|&&p| p == pid).unwrap();
         let (follower_server, _, _) = handlers.get(follower).unwrap();
         let leader = follower_server
             .lock()
@@ -166,7 +171,7 @@ fn recovery(mut handlers: HashMap<u64, (Arc<Mutex<OmniPaxosKV>>, JoinHandle<()>,
             .expect("Failed to get leader");
         println!("Elected new leader: {}, asked this server: {}", leader, follower);
 
-        let follower = SERVERS.iter().find(|&&p| p != *pid).unwrap();
+        let follower = SERVERS.iter().find(|&&p| p != pid).unwrap();
         let (follower_server, _, _) = handlers.get(follower).unwrap();
         let leader = follower_server
             .lock()
@@ -174,5 +179,5 @@ fn recovery(mut handlers: HashMap<u64, (Arc<Mutex<OmniPaxosKV>>, JoinHandle<()>,
             .get_current_leader()
             .expect("Failed to get leader");
         println!("Elected new leader: {}, asked this server: {}", leader, follower);
-    }
+    // }
 }
