@@ -21,7 +21,7 @@ First this function takes a reference to a **Paxos** instance and returns a **Ha
 
 The function writes the _statistics_ to this file (**output_file_path**) using a <snap style="color:orange">**BufWriter**</snap>.
 
-Who we write on the file ✍️
+How we write on the file ✍️
 
 ```Rust
 let path = Path::new(output_file_path);
