@@ -1,15 +1,12 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+use std::{collections::HashMap, sync::{Arc, Mutex}};
 
 use commitlog::LogOptions;
 use omnipaxos_core::{messages::Message, util::NodeId};
-use omnipaxos_storage::persistent_storage::{PersistentStorage, PersistentStorageConfig};
+use omnipaxos_storage::persistent_storage::PersistentStorageConfig;
 use sled::Config;
 use tokio::{sync::mpsc, time};
 
-use crate::{OmniPaxosKV, recovery, TO_RECOVER, util::{ELECTION_TIMEOUT, OUTGOING_MESSAGE_PERIOD}, WAIT_LEADER_TIMEOUT};
+use crate::{OmniPaxosKV, recovery, RUNTIME, TO_RECOVER, util::{ELECTION_TIMEOUT, OUTGOING_MESSAGE_PERIOD}, WAIT_LEADER_TIMEOUT};
 use crate::kv::{KeyValue, KVSnapshot};
 
 pub struct OmniPaxosServer {
@@ -33,16 +30,20 @@ impl OmniPaxosServer {
             // println!("Response message: {:?}", response);
             if response.is_err() {
                 println!("Here is error: {:?}, pid {}", response, receiver);
-                recovery(receiver);
+                self.omni_paxos.lock().unwrap().reconnected(receiver);
             }
+            // else {
+            //     let pr: i32 = rand::thread_rng().gen_range(1..100);
+            //     println!("Probability: {}", pr);
+            //     if pr > 90 {
+            //         let (k, v) = recovery(receiver);
+            //         OP_SERVER_HANDLERS.lock().unwrap().insert(k, v);
+            //     }
+            // }
         }
     }
 
     pub(crate) async fn run(&mut self) {
-        // network layer notifies of reconnecting to peer with pid = 3
-        // This should only be called if the underlying network implementation indicates that a connection has been re-established.
-        // omni_paxos.reconnected(3);
-
         let mut outgoing_interval = time::interval(OUTGOING_MESSAGE_PERIOD);
         let mut election_interval = time::interval(ELECTION_TIMEOUT);
         loop {

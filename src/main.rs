@@ -8,7 +8,7 @@ use omnipaxos_core::{
     util::NodeId,
 };
 use omnipaxos_storage::persistent_storage::PersistentStorage;
-use tokio::{runtime::Builder, runtime::Runtime, sync::mpsc};
+use tokio::{runtime::Builder, runtime::Runtime, sync::mpsc, time};
 use tokio::task::JoinHandle;
 
 use crate::{
@@ -128,56 +128,59 @@ fn initialise_handlers() -> HashMap<u64, (Arc<Mutex<OmniPaxosKV>>, JoinHandle<()
 }
 
 
-fn recovery(pid: u64) {
+fn recovery(pid: u64) -> (u64, (Arc<Mutex<OmniPaxosKV>>, JoinHandle<()>, OmniPaxosConfig)) {
     // Configuration from previous storage
-    // let pids = TO_RECOVER.lock().unwrap();
+    let handlers = OP_SERVER_HANDLERS.lock().unwrap();
 
-    let mut handlers = OP_SERVER_HANDLERS.lock().unwrap();
+    std::thread::sleep(WAIT_LEADER_TIMEOUT * 5);
 
-    // for pid in pids.iter() {
-        println!("---------------- Recovering pid {:?}", pid);
+    let follower = SERVERS.iter().find(|&&p| p != pid).unwrap();
+    let (follower_server, _, _) = handlers.get(follower).unwrap();
+    println!("---------------- Searching for a leader pid {:?}", follower);
+    let leader = follower_server
+        .lock()
+        .unwrap()
+        .get_current_leader()
+        .expect("Failed to get leader");
+    println!("Old leader: {}, asked this server: {}", leader, follower);
 
-        // Re-create storage with previous state, then create `OmniPaxos`
-        let (recovered_paxos, old_join, config)
-            = handlers.get(&pid).unwrap();
+    // Re-create storage with previous state, then create `OmniPaxos`
+    let (recovered_paxos, old_join, config)
+        = handlers.get(&pid).unwrap();
 
-        let (sender_channels, mut receiver_channels) = initialise_channels();
-        recovered_paxos.lock().unwrap().fail_recovery();
-        let peers: Vec<u64> = SERVERS.iter().filter(|&&p| p != pid).copied().collect();
-        for peer in peers {
-            recovered_paxos.lock().unwrap().reconnected(peer);
+    old_join.abort();
+
+    println!("---------------- Recovering pid {:?}", pid);
+
+    let (sender_channels, mut receiver_channels) = initialise_channels();
+    let peers: Vec<u64> = SERVERS.iter().filter(|&&p| p != pid).copied().collect();
+    recovered_paxos.lock().unwrap().fail_recovery();
+    let mut op_server = OmniPaxosServer {
+        omni_paxos: Arc::clone(&recovered_paxos),
+        incoming: receiver_channels.remove(&pid).unwrap(),
+        outgoing: sender_channels.clone(),
+    };
+    for peer in peers {
+        recovered_paxos.lock().unwrap().reconnected(peer);
+    }
+    let join_handle = RUNTIME.spawn({
+        async move {
+            op_server.run().await;
         }
-        let mut op_server = OmniPaxosServer {
-            omni_paxos: Arc::clone(&recovered_paxos),
-            incoming: receiver_channels.remove(&pid).unwrap(),
-            outgoing: sender_channels.clone(),
-        };
-        let join_handle = RUNTIME.spawn({
-            async move {
-                op_server.run().await;
-            }
-        });
-        std::thread::sleep(WAIT_LEADER_TIMEOUT);
-        // handlers.insert(pid, (recovered_paxos.clone(), join_handle, config.clone()));
-        println!("---------------- Recovered pid {:?}", pid);
+    });
+    std::thread::sleep(WAIT_LEADER_TIMEOUT * 2);
+    println!("---------------- Recovered pid {:?}", pid);
 
-        // Check leaders
-        let follower = SERVERS.iter().find(|&&p| p == pid).unwrap();
-        let (follower_server, _, _) = handlers.get(follower).unwrap();
-        let leader = follower_server
-            .lock()
-            .unwrap()
-            .get_current_leader()
-            .expect("Failed to get leader");
-        println!("Elected new leader: {}, asked this server: {}", leader, follower);
+    // Check leaders
+    let follower = SERVERS.iter().find(|&&p| p != pid).unwrap();
+    let (follower_server, _, _) = handlers.get(follower).unwrap();
+    println!("---------------- Searching for a leader pid {:?}", follower);
+    let leader = follower_server
+        .lock()
+        .unwrap()
+        .get_current_leader()
+        .expect("Failed to get leader");
+    println!("Elected new leader: {}, asked this server: {}", leader, follower);
 
-        let follower = SERVERS.iter().find(|&&p| p != pid).unwrap();
-        let (follower_server, _, _) = handlers.get(follower).unwrap();
-        let leader = follower_server
-            .lock()
-            .unwrap()
-            .get_current_leader()
-            .expect("Failed to get leader");
-        println!("Elected new leader: {}, asked this server: {}", leader, follower);
-    // }
+    (pid, (recovered_paxos.clone(), join_handle, config.clone()))
 }

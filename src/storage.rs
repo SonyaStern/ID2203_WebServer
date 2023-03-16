@@ -69,7 +69,7 @@ pub async fn create_kv(kv: KeyValue) -> u64 {
             match ent {
                 LogEntry::Decided(kv_decided) => {
                     if kv.key == kv_decided.key {
-                        let new_idx = before_idx + (i as u64);
+                        let new_idx = before_idx + (i as u64) + 1;
                         println!("Adding value: {:?}, decided idx {} via server {}",
                                  kv, new_idx, server_id);
                         return new_idx;
