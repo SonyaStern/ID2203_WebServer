@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
-use rand::Rng;
 
 use lazy_static::lazy_static;
 
@@ -28,6 +27,24 @@ lazy_static! {
         ));
         set
     };
+
+    pub static ref TEST_STORAGE_REPLICAS: Vec<Arc<Mutex<KVStore>>> = {
+        let mut set = Vec::new();
+         set.insert(0, Arc::new(Mutex::new(
+            KVStore {
+                        key_value: HashMap::new(),
+                        decided_idx: 0,
+                    })
+        ));
+         set.insert(0, Arc::new(Mutex::new(
+            KVStore {
+                        key_value: HashMap::new(),
+                        decided_idx: 0,
+                    })
+        ));
+        set.insert(0, STORAGE_REPLICAS.get(0).unwrap().clone());
+        set
+    };
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -37,7 +54,11 @@ pub struct KVStore {
 }
 
 impl KVStore {
-    pub(crate) fn get_storage(id: usize) -> Arc<Mutex<KVStore>> {
-        STORAGE_REPLICAS.get(id).unwrap().clone()
+    pub(crate) fn get_storage(id: usize, is_failed: bool) -> Arc<Mutex<KVStore>> {
+        if is_failed {
+            TEST_STORAGE_REPLICAS.get(id).unwrap().clone()
+        } else {
+            STORAGE_REPLICAS.get(id).unwrap().clone()
+        }
     }
 }

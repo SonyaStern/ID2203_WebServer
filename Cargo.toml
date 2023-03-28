@@ -31,6 +31,7 @@ futures = "0.3.5"
 rand = "0.8.4"
 
 [features]
+test = []
 #batch_accept = []
 #continued_leader_reconfiguration = []
 #logging  = [ "slog", "slog-term", "slog-async"]

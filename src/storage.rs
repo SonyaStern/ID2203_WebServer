@@ -6,17 +6,23 @@ use rand::Rng;
 use crate::{KeyValue, SERVERS, WAIT_DECIDED_TIMEOUT};
 use crate::kv_controller::KeyValueResponse;
 use crate::nodes::KVStore;
-use crate::OP_SERVER_HANDLERS;
 use crate::nodes::STORAGE_REPLICAS;
+use crate::OP_SERVER_HANDLERS;
 
 const PEERS: u64 = SERVERS.len() as u64;
 
 pub async fn get_kv(key: String) -> KeyValueResponse {
+    let mut is_failed = false;
+    if cfg!(feature="test") && rand::thread_rng().gen_range(1..10) > 7 {
+        is_failed = true;
+        println!("A storage was disconnected")
+    }
+    let replica_id = rand::thread_rng().gen_range(0..STORAGE_REPLICAS.len());
+    sync_decided_kv(replica_id, is_failed).await;
 
-    let replica_id = rand::thread_rng().gen_range(1..STORAGE_REPLICAS.len());
-    sync_decided_kv(replica_id).await;
+    let kv_store = KVStore::get_storage(replica_id, is_failed);
 
-    let kv_store = KVStore::get_storage(replica_id);
+    println!("Get value by replica {:?}", replica_id);
     let storage = kv_store.lock().unwrap();
 
     let value = storage.key_value.get(key.as_str());
@@ -43,9 +49,14 @@ pub async fn get_kv(key: String) -> KeyValueResponse {
 pub async fn create_kv(kv: KeyValue) -> u64 {
     // sync_decided_kv().await;
 
-    let replica_id = rand::thread_rng().gen_range(1..STORAGE_REPLICAS.len());
+    let mut is_failed = false;
+    if cfg!(feature="test") && rand::thread_rng().gen_range(1..10) > 7 {
+        is_failed = true;
+        println!("The last storage was disconnected")
+    }
+    let replica_id = rand::thread_rng().gen_range(0..STORAGE_REPLICAS.len());
 
-    let kv_store = KVStore::get_storage(replica_id);
+    let kv_store = KVStore::get_storage(replica_id, is_failed);
     let storage = kv_store.lock().unwrap();
     storage.key_value.get(&kv.key);
 
@@ -84,8 +95,8 @@ pub async fn create_kv(kv: KeyValue) -> u64 {
                 LogEntry::Decided(kv_decided) => {
                     if kv.key == kv_decided.key {
                         let new_idx = before_idx + (i as u64) + 1;
-                        println!("Adding value: {:?}, decided idx {} via server {}",
-                                 kv, new_idx, leader_id);
+                        println!("Adding value: {:?}, decided idx {} via server {} and replica {}",
+                                 kv, new_idx, leader_id, replica_id);
                         return new_idx;
                     }
                 }
@@ -95,8 +106,8 @@ pub async fn create_kv(kv: KeyValue) -> u64 {
     }
 }
 
-async fn sync_decided_kv(replica_id: usize) {
-    let kv_store = KVStore::get_storage(replica_id);
+async fn sync_decided_kv(replica_id: usize, is_failed: bool) {
+    let kv_store = KVStore::get_storage(replica_id, is_failed);
     let mut storage = kv_store.lock().unwrap();
 
     let handler = OP_SERVER_HANDLERS.lock().unwrap();
