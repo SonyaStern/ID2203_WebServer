@@ -18,7 +18,7 @@ pub async fn create(kv_req: Json<KeyValue>) -> HttpResponse {
     };
 
     let decided_idx = create_kv(kv.clone()).await;
-    println!("decided_idx: {}", decided_idx);
+    println!("decided_idx: {:?}", decided_idx);
 
     let response = KeyValueResponse {
         key: kv.key,

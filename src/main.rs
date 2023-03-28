@@ -18,12 +18,12 @@ use crate::{
 };
 use crate::kv_controller::{create, get};
 
-mod nodes;
 mod kv;
 mod server;
 mod util;
 mod kv_controller;
 mod storage;
+mod nodes;
 
 type OmniPaxosKV = OmniPaxos<KeyValue, KVSnapshot, PersistentStorage<KeyValue, KVSnapshot>>;
 

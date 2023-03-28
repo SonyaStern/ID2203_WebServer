@@ -20,3 +20,9 @@ Optional
 1. Add Post snapshot
 2. Add delete
 3. Add CAS
+
+
+
+TODO:
+1. Update storage ro have multiple instances to simulate replication
+2. Read majority

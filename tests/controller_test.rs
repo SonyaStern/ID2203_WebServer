@@ -23,7 +23,7 @@ async fn test_create() {
 
     assert_body_matches! {
         body,
-        KeyValueResponse { key: "a", value: 2, decided_idx: 0}
+        KeyValueResponse { key: "a", value: 2, decided_idx: 1}
     }
 }
 
