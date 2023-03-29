@@ -4,6 +4,7 @@ use omnipaxos_core::util::LogEntry;
 use rand::Rng;
 
 use crate::{KeyValue, SERVERS, WAIT_DECIDED_TIMEOUT};
+use crate::kv::KeyValueCas;
 use crate::kv_controller::KeyValueResponse;
 use crate::nodes::KVStore;
 use crate::nodes::STORAGE_REPLICAS;
@@ -44,6 +45,19 @@ pub async fn get_kv(key: String) -> KeyValueResponse {
         }
     }
     response.clone()
+}
+
+pub async fn cas_kv(kv: KeyValueCas) -> u64 {
+    let read_response = get_kv(kv.key.clone()).await;
+    if read_response.value == kv.old_value {
+        let new_kv = KeyValue {
+            key: kv.key,
+            value: kv.new_value,
+        };
+        return create_kv(new_kv).await;
+    } else {
+        return 0;
+    }
 }
 
 pub async fn create_kv(kv: KeyValue) -> u64 {

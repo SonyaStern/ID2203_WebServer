@@ -118,6 +118,86 @@ async fn test_get() {
     }
 }
 
+#[tokio::test]
+async fn test_cas() {
+    let create_request = Request::post(path!["key-value"])
+        .with_header("ContentType", "application/json")
+        .with_body(KeyValue {
+            key: String::from("a"),
+            value: 1,
+        });
+
+    let body = CONTEXT
+        .run(create_request)
+        .await
+        .expect_status(StatusCode::CREATED)
+        .await;
+
+    assert_body_matches! {
+        body,
+        KeyValueResponse { key: "a", value: 1,..}
+    }
+
+    let cas_request = Request::post(path!["key-value/cas"])
+        .with_header("ContentType", "application/json")
+        .with_body(KeyValueCas {
+            key: String::from("a"),
+            old_value: 1,
+            new_value: 2,
+        });
+
+    let body = CONTEXT
+        .run(cas_request)
+        .await
+        .expect_status(StatusCode::OK)
+        .await;
+
+    assert_body_matches! {
+        body,
+        KeyValueResponse { key: "a", value: 1,..}
+    }
+}
+
+#[tokio::test]
+async fn test_unsuccessful_cas() {
+    let create_request = Request::post(path!["key-value"])
+        .with_header("ContentType", "application/json")
+        .with_body(KeyValue {
+            key: String::from("a"),
+            value: 1,
+        });
+
+    let body = CONTEXT
+        .run(create_request)
+        .await
+        .expect_status(StatusCode::CREATED)
+        .await;
+
+    assert_body_matches! {
+        body,
+        KeyValueResponse { key: "a", value: 1,..}
+    }
+
+    let cas_request = Request::post(path!["key-value/cas"])
+        .with_header("ContentType", "application/json")
+        .with_body(KeyValueCas {
+            key: String::from("a"),
+            old_value: 10,
+            new_value: 2,
+        });
+
+    let body = CONTEXT
+        .run(cas_request)
+        .await
+        .expect_status::<String>(StatusCode::BAD_REQUEST)
+        .await;
+
+    assert_body_matches! {
+        body,
+        "Could not CAS KV since the old value was different"
+    }
+}
+
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct KeyValue {
@@ -130,4 +210,11 @@ pub struct KeyValueResponse {
     pub key: String,
     pub value: u64,
     pub decided_idx: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct KeyValueCas {
+    pub key: String,
+    pub old_value: u64,
+    pub new_value: u64,
 }

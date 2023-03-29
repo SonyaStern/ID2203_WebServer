@@ -8,7 +8,8 @@ use serde::Deserialize;
 use storage::create_kv;
 
 use crate::{KeyValue, storage};
-use crate::storage::get_kv;
+use crate::kv::KeyValueCas;
+use crate::storage::{cas_kv, get_kv};
 
 #[post("/key-value")]
 pub async fn create(kv_req: Json<KeyValue>) -> HttpResponse {
@@ -30,6 +31,35 @@ pub async fn create(kv_req: Json<KeyValue>) -> HttpResponse {
         .content_type("application/json")
         .status(StatusCode::CREATED)
         .json(response)
+}
+
+#[post("/key-value/cas")]
+pub async fn cas(kv_req: Json<KeyValueCas>) -> HttpResponse {
+    let kv = KeyValueCas {
+        key: String::from(&kv_req.key),
+        old_value: kv_req.old_value,
+        new_value: kv_req.new_value
+    };
+
+    let decided_idx = cas_kv(kv.clone()).await;
+    println!("CAS decided_idx: {:?}", decided_idx);
+
+    if decided_idx == 0 {
+        HttpResponse::BadRequest()
+            .content_type("application/json")
+            .status(StatusCode::BAD_REQUEST)
+            .json("Could not CAS KV since the old value was different")
+    } else {
+        let response = KeyValueResponse {
+            key: kv.key,
+            value: kv.old_value,
+            decided_idx,
+        };
+        HttpResponse::Ok()
+            .content_type("application/json")
+            .status(StatusCode::OK)
+            .json(response)
+    }
 }
 
 #[get("/key-value/{key}")]

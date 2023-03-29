@@ -10,6 +10,13 @@ pub struct KeyValue {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct KeyValueCas {
+    pub key: String,
+    pub old_value: u64,
+    pub new_value: u64,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct KVSnapshot {
     pub snapshotted: HashMap<String, u64>,
 }

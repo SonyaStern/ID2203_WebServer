@@ -16,7 +16,7 @@ use crate::{
     server::OmniPaxosServer,
     util::*,
 };
-use crate::kv_controller::{create, get};
+use crate::kv_controller::{cas, create, get};
 
 mod kv;
 mod server;
@@ -61,6 +61,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .service(create)
             .service(get)
+            .service(cas)
     })
         .bind(("127.0.0.1", 8000))?
         .run()
